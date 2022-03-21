@@ -67,7 +67,7 @@ helm upgrade --install nfs-client-provisioner c7n/nfs-client-provisioner \
 ##### 拉取git
 
 ```shell
-#git clone
+git clone https://github.com/anxu-oo/prometheus-k8s.git
 
 ```
 
