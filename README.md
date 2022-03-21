@@ -2,6 +2,7 @@
 
 ```shell
 #git clone
+git clone https://github.com/anxu-oo/prometheus-k8s.git
 
 ```
 
