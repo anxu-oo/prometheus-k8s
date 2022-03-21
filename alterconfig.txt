@@ -1,0 +1,60 @@
+global:
+  resolve_timeout: 5m
+route:
+  receiver: webhookcritical
+  group_by:
+  - namespace
+  - alertname
+  continue: false
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 12h
+  routes:
+  - receiver: Watchdog
+    match:
+      alertname: Watchdog
+    continue: false
+  
+  - receiver: webhookwarning
+    match:
+      severity: warning
+
+  - receiver: webhookemergency
+    match:
+      severity: emergency
+  
+  - receiver: webhookcritical
+    match:
+      severity: critical
+
+inhibit_rules:
+- source_match:
+    severity: emergency
+  target_match_re:
+    severity: warning|critical
+  equal:
+  - namespace
+  - alertname
+- source_match:
+    severity: critical
+  target_match_re:
+    severity: warning
+  equal:
+  - namespace
+  - alertname
+
+receivers:
+- name: Watchdog
+- name: webhookwarning
+  webhook_configs:
+  - url: http://webhook-dingtalk:8060/dingtalk/webhook1/send
+    send_resolved: true
+- name: webhookcritical
+  webhook_configs:
+  - url: http://webhook-dingtalk:8060/dingtalk/webhook2/send
+    send_resolved: true
+- name: webhookemergency
+  webhook_configs:
+  - url: http://webhook-dingtalk:8060/dingtalk/webhook3/send
+    send_resolved: true
+templates: []

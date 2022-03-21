@@ -1,0 +1,634 @@
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  labels:
+    prometheus: k8s
+    role: alert-rules
+  name: other-rule
+  namespace: monitoring
+spec:
+  groups:
+  - name: kubernetes-absent
+    rules:
+    - alert: Alertmanager Pod不可用
+      annotations:
+        message: Alertmanager已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="alertmanager-main",namespace="monitoring"} == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: CoreDNS Pod不可用
+      annotations:
+        message: CoreDNS已从Prometheus目标发现中消失.
+      expr: |
+        # absent(up{job="kube-dns"} == 1)
+        absent(up{job="kube-dns"} == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: KubeAPI服务不可用
+      annotations:
+        message: KubeAPI已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="apiserver"} == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: KubeControllerManager不可用
+      annotations:
+        message: KubeControllerManager已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="kube-controller-manager"} == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: KubeScheduler服务不可用
+      annotations:
+        message: KubeScheduler已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="kube-scheduler"} == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: KubeStateMetrics服务不可用
+      annotations:
+        message: KubeStateMetrics已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="kube-state-metrics"} == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: Kubelet服务不可用
+      annotations:
+        message: Kubelet已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="kubelet"} == 1)
+      for: 1m
+      labels:
+        severity: critical
+    - alert: Prometheus服务不可用
+      annotations:
+        message: Prometheus已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="prometheus-k8s",namespace="monitoring"} == 1)
+      for: 15m
+      labels:
+        severity: critical
+    - alert: PrometheusOperator服务不可用
+      annotations:
+        message: PrometheusOperator已从Prometheus目标发现中消失.
+      expr: |
+        absent(up{job="prometheus-operator",namespace="monitoring"} == 1)
+      for: 15m
+      labels:
+        severity: critical
+  - name: kubernetes-apps
+    rules:
+    - alert: Pod不断重启
+      annotations:
+        message: Pod {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container
+          }}) 每5分钟重启 {{ printf "%.0f" $value }}.
+      expr: |
+        rate(kube_pod_container_status_restarts_total{job="kube-state-metrics"}[15m]) * 60 * 5 > 0
+      for: 15m
+      labels:
+        severity: critical
+    - alert: Pod未就绪
+      annotations:
+        message: Pod {{ $labels.namespace }}/{{ $labels.pod }} 超过1分钟处于未就绪状态.
+      expr: |
+        sum by (namespace, pod)  (kube_pod_status_phase{job="kube-state-metrics", phase!~"Running|Succeeded|ContainerCreating|PodInitializing|Completed"} * on(namespace,pod) group_left(owner_kind) kube_pod_owner{owner_kind!="Job"}) > 0
+      for: 1m
+      labels:
+        severity: critical
+    - alert: Deployment服务未达到期望副本数
+      annotations:
+        message: Deployment {{ $labels.namespace }}/{{ $labels.deployment }} 5min未达到期望副本数.
+      expr: |
+        kube_deployment_spec_replicas{job="kube-state-metrics"}
+          !=
+        kube_deployment_status_replicas_available{job="kube-state-metrics"}
+      for: 5m
+      labels:
+        severity: critical
+    - alert: StatefulSet服务未达到期望副本数
+      annotations:
+        message: StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} 5min未达到期望副本数.
+      expr: |
+        kube_statefulset_status_replicas_ready{job="kube-state-metrics"}
+          !=
+        kube_statefulset_status_replicas{job="kube-state-metrics"}
+      for: 1m
+      labels:
+        severity: critical
+    - alert: StatefulSet更新未成功
+      annotations:
+        message: StatefulSet {{ $labels.namespace }}/{{ $labels.statefulset }} 1min更新未成功.
+      expr: |
+        max without (revision) (
+          kube_statefulset_status_current_revision{job="kube-state-metrics"}
+            unless
+          kube_statefulset_status_update_revision{job="kube-state-metrics"}
+        )
+          *
+        (
+          kube_statefulset_replicas{job="kube-state-metrics"}
+            !=
+          kube_statefulset_status_replicas_updated{job="kube-state-metrics"}
+        )
+      for: 1m
+      labels:
+        severity: critical
+    - alert: DaemonSetRollout异常
+      annotations:
+        message: DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset }} 期望部署的Pods仅仅准备好{{
+          $value | humanizePercentage }}.
+      expr: |
+        kube_daemonset_status_number_ready{job="kube-state-metrics"}
+          /
+        kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics"} < 1.00
+      for: 1m
+      labels:
+        severity: critical
+    - alert: DaemonSet未调度
+      annotations:
+        message: '{{ $value }} Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset
+          }} 未调度.'
+      expr: |
+        kube_daemonset_status_desired_number_scheduled{job="kube-state-metrics"}
+          -
+        kube_daemonset_status_current_number_scheduled{job="kube-state-metrics"} > 0
+      for: 1m
+      labels:
+        severity: warning
+    - alert: DaemonSet丢失调度
+      annotations:
+        message: '{{ $value }} Pods of DaemonSet {{ $labels.namespace }}/{{ $labels.daemonset
+          }} 丢失调度.'
+      expr: |
+        kube_daemonset_status_number_misscheduled{job="kube-state-metrics"} > 0
+      for: 10m
+      labels:
+        severity: warning
+    - alert: Job完成情况
+      annotations:
+        message: Job {{ $labels.namespace }}/{{ $labels.job_name }} 超过一小时未完成.
+      expr: |
+        kube_job_spec_completions{job="kube-state-metrics"} - kube_job_status_succeeded{job="kube-state-metrics"}  > 0
+      for: 1h
+      labels:
+        severity: warning
+    - alert: Job执行失败
+      annotations:
+        message: Job {{ $labels.namespace }}/{{ $labels.job_name }} 执行失败.
+      expr: |
+        kube_job_failed{job="kube-state-metrics"}  > 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeHpaReplicasMismatch
+      annotations:
+        message: HPA {{ $labels.namespace }}/{{ $labels.hpa }} has not matched the
+          desired number of replicas for longer than 15 minutes.
+      expr: |
+        (kube_hpa_status_desired_replicas{job="kube-state-metrics"}
+          !=
+        kube_hpa_status_current_replicas{job="kube-state-metrics"})
+          and
+        changes(kube_hpa_status_current_replicas[15m]) == 0
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeHpaMaxedOut
+      annotations:
+        message: HPA {{ $labels.namespace }}/{{ $labels.hpa }} has been running at
+          max replicas for longer than 15 minutes.
+      expr: |
+        kube_hpa_status_current_replicas{job="kube-state-metrics"}
+          ==
+        kube_hpa_spec_max_replicas{job="kube-state-metrics"}
+      for: 15m
+      labels:
+        severity: warning
+  - name: kubernetes-resources
+    rules:
+    - alert: KubeCPU使用过量
+      annotations:
+        message: 群集已过度使用Pod的CPU资源请求，并且无法容忍节点故障.
+      expr: |
+        sum(namespace:kube_pod_container_resource_requests_cpu_cores:sum)
+          /
+        sum(kube_node_status_allocatable_cpu_cores)
+          >
+        (count(kube_node_status_allocatable_cpu_cores)-1) / count(kube_node_status_allocatable_cpu_cores)
+      for: 5m
+      labels:
+        severity: warning
+    - alert: Kube内存使用过量
+      annotations:
+        message: 群集已过量使用Pod的内存资源请求，因此无法忍受节点故障.
+      expr: |
+        sum(namespace:kube_pod_container_resource_requests_memory_bytes:sum)
+          /
+        sum(kube_node_status_allocatable_memory_bytes)
+          >
+        (count(kube_node_status_allocatable_memory_bytes)-1)
+          /
+        count(kube_node_status_allocatable_memory_bytes)
+      for: 5m
+      labels:
+        severity: warning
+    - alert: KubeCPU使用过量
+      annotations:
+        message: 群集已超额使用了对命名空间的CPU资源请求。
+      expr: |
+        sum(kube_resourcequota{job="kube-state-metrics", type="hard", resource="cpu"})
+          /
+        sum(kube_node_status_allocatable_cpu_cores)
+          > 1.5
+      for: 5m
+      labels:
+        severity: warning
+    - alert: Kube内存使用过量
+      annotations:
+        message: 群集已超额使用了对命名空间的内存资源请求。
+      expr: |
+        sum(kube_resourcequota{job="kube-state-metrics", type="hard", resource="memory"})
+          /
+        sum(kube_node_status_allocatable_memory_bytes{job="node-exporter"})
+          > 1.5
+      for: 5m
+      labels:
+        severity: warning
+    - alert: podcpu使用率过高
+      annotations:
+        message: '命名空间: {{ $labels.namespace }} | Pod名称: {{ $labels.pod }} CPU使用大于80%
+          (当前值: {{ $value }})'
+      expr: |
+        (sum (rate(container_cpu_usage_seconds_total{image!=""}[2m])) by (pod,namespace) / sum(kube_pod_container_resource_limits{resource="cpu"}) by (pod,namespace)  * 100) > 80
+      for: 2m
+      labels:
+        severity: warning
+    - alert: podmem使用率过高
+      annotations:
+        message: '命名空间: {{ $labels.namespace }} | Pod名称: {{ $labels.pod }} CPU使用大于80%
+          (当前值: {{ $value }})'
+      expr: |
+        sum(container_memory_rss{image!="",pod="test-depl-b45c64b8d-t98vd"}) by(pod, namespace) / sum(kube_pod_container_resource_limits{resource="memory"}) by(pod, namespace) * 100 != +inf   > 80
+      for: 2m
+      labels:
+        severity: warning
+    - alert: 超过Kube配额
+      annotations:
+        message: Namespace {{ $labels.namespace }} is using {{ $value | humanizePercentage
+          }} of its {{ $labels.resource }} quota.
+      expr: |
+        kube_resourcequota{job="kube-state-metrics", type="used"}
+          / ignoring(instance, job, type)
+        (kube_resourcequota{job="kube-state-metrics", type="hard"} > 0)
+          > 0.90
+      for: 15m
+      labels:
+        severity: warning
+    - alert: CPUThrottlingHigh
+      annotations:
+        message: '{{ $value | humanizePercentage }} throttling of CPU in namespace
+          {{ $labels.namespace }} for container {{ $labels.container }} in pod {{
+          $labels.pod }}.'
+      expr: |
+        sum(increase(container_cpu_cfs_throttled_periods_total{container!="", }[5m])) by (container, pod, namespace)
+          /
+        sum(increase(container_cpu_cfs_periods_total{}[5m])) by (container, pod, namespace)
+          > ( 25 / 100 )
+      for: 15m
+      labels:
+        severity: warning
+  - name: kubernetes-storage
+    rules:
+    - alert: KubePersistentVolumeUsageCritical
+      annotations:
+        message: The PersistentVolume claimed by {{ $labels.persistentvolumeclaim
+          }} in Namespace {{ $labels.namespace }} is only {{ $value | humanizePercentage
+          }} free.
+      expr: |
+        kubelet_volume_stats_available_bytes{job="kubelet"}
+          /
+        kubelet_volume_stats_capacity_bytes{job="kubelet"}
+          < 0.03
+      for: 1m
+      labels:
+        severity: critical
+    - alert: KubePersistentVolumeFullInFourDays
+      annotations:
+        message: Based on recent sampling, the PersistentVolume claimed by {{ $labels.persistentvolumeclaim
+          }} in Namespace {{ $labels.namespace }} is expected to fill up within four
+          days. Currently {{ $value | humanizePercentage }} is available.
+      expr: |
+        (
+          kubelet_volume_stats_available_bytes{job="kubelet"}
+            /
+          kubelet_volume_stats_capacity_bytes{job="kubelet"}
+        ) < 0.15
+        and
+        predict_linear(kubelet_volume_stats_available_bytes{job="kubelet"}[6h], 4 * 24 * 3600) < 0
+      for: 5m
+      labels:
+        severity: critical
+    - alert: KubePersistentVolumeErrors
+      annotations:
+        message: The persistent volume {{ $labels.persistentvolume }} has status {{
+          $labels.phase }}.
+      expr: |
+        kube_persistentvolume_status_phase{phase=~"Failed|Pending",job="kube-state-metrics"} > 0
+      for: 5m
+      labels:
+        severity: critical
+  - name: kubernetes-system
+    rules:
+    - alert: Node未就绪
+      annotations:
+        message: '{{ $labels.node }} 超过一分钟未就绪.'
+      expr: |
+        kube_node_status_condition{job="kube-state-metrics",condition="Ready",status="true"} == 0
+      for: 1m
+      labels:
+        severity: warning
+    - alert: Kube版本不一致
+      annotations:
+        message: Kubernetes有{{ $value}}个不同版本组件正在运行.
+      expr: |
+        count(count by (gitVersion) (label_replace(kubernetes_build_info{job!~"kube-dns|coredns"},"gitVersion","$1","gitVersion","(v[0-9]*.[0-9]*.[0-9]*).*"))) > 1
+      for: 15m
+      labels:
+        severity: warning
+    - alert: KubeClient错误
+      annotations:
+        message: Kubernetes API server client '{{ $labels.job }}/{{ $labels.instance
+          }}' is experiencing {{ $value | humanizePercentage }} errors.'
+      expr: |
+        (sum(rate(rest_client_requests_total{code=~"5.."}[5m])) by (instance, job)
+          /
+        sum(rate(rest_client_requests_total[5m])) by (instance, job))
+        > 0.01
+      for: 1m
+      labels:
+        severity: warning
+    - alert: Kubelet Pod过多
+      annotations:
+        message: Kubelet '{{ $labels.node }}' is running at {{ $value | humanizePercentage
+          }} of its Pod capacity.
+      expr: |
+        max(max(kubelet_running_pod_count{job="kubelet"}) by(instance) * on(instance) group_left(node) kubelet_node_name{job="kubelet"}) by(node) / max(kube_node_status_capacity_pods{job="kube-state-metrics"}) by(node) > 0.95
+      for: 1m
+      labels:
+        severity: warning
+    - alert: KubeAPI延迟过高
+      annotations:
+        message: KubeAPI有99％请求延迟为{{ $value }}秒在{{ $labels.verb }} {{ $labels.resource
+          }}.
+      expr: |
+        cluster_quantile:apiserver_request_duration_seconds:histogram_quantile{job="apiserver",quantile="0.99",subresource!="log",verb!~"^(?:LIST|WATCH|WATCHLIST|PROXY|CONNECT)$"} > 1
+      for: 10m
+      labels:
+        severity: warning
+    - alert: KubeAPI延迟过高
+      annotations:
+        message: KubeAPI有99％请求延迟为{{ $value }}秒在{{ $labels.verb }} {{ $labels.resource
+          }}.
+      expr: |
+        cluster_quantile:apiserver_request_duration_seconds:histogram_quantile{job="apiserver",quantile="0.99",subresource!="log",verb!~"^(?:LIST|WATCH|WATCHLIST|PROXY|CONNECT)$"} > 4
+      for: 10m
+      labels:
+        severity: critical
+    - alert: KubeAPIErrorsHigh
+      annotations:
+        message: API server is returning errors for {{ $value | humanizePercentage
+          }} of requests.
+      expr: |
+        sum(rate(apiserver_request_total{job="apiserver",code=~"^(?:5..)$"}[5m]))
+          /
+        sum(rate(apiserver_request_total{job="apiserver"}[5m])) > 0.03
+      for: 10m
+      labels:
+        severity: critical
+    - alert: KubeAPI错误过多
+      annotations:
+        message: API server is returning errors for {{ $value | humanizePercentage
+          }} of requests for {{ $labels.verb }} {{ $labels.resource }} {{ $labels.subresource
+          }}.
+      expr: |
+        sum(rate(apiserver_request_total{job="apiserver",code=~"^(?:5..)$"}[5m])) by (resource,subresource,verb)
+          /
+        sum(rate(apiserver_request_total{job="apiserver"}[5m])) by (resource,subresource,verb) > 0.10
+      for: 10m
+      labels:
+        severity: critical
+    - alert: Kube客户证书到期
+      annotations:
+        message: 用于验证apiserver的客户端证书的有效期限少于7.0天.
+      expr: |
+        apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0 and histogram_quantile(0.01, sum by (job, le) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 604800
+      labels:
+        severity: warning
+    - alert: Kube客户证书到期
+      annotations:
+        message: 用于验证apiserver的客户端证书的有效期限少于1.0天.
+      expr: |
+        apiserver_client_certificate_expiration_seconds_count{job="apiserver"} > 0 and histogram_quantile(0.01, sum by (job, le) (rate(apiserver_client_certificate_expiration_seconds_bucket{job="apiserver"}[5m]))) < 86400
+      labels:
+        severity: critical
+  - name: prometheus
+    rules:
+    - alert: Prometheus配置不正确
+      annotations:
+        description: Prometheus {{ $labels.namespace }}/{{ $labels.pod }}无法重新加载其配置.
+        summary: Prometheus重载配置失败.
+      expr: |
+        # Without max_over_time, failed scrapes could create false negatives, see
+        # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+        max_over_time(prometheus_config_last_reload_successful{job="prometheus-k8s",namespace="monitoring"}[5m]) == 0
+      for: 10m
+      labels:
+        severity: critical
+    - alert: Prometheus警报队列已满
+      annotations:
+        description: Prometheus {{ $labels.namespace }}/{{ $labels.pod }}的警报通知队列已满.
+        summary: Prometheus警报队列已满超过30min.
+      expr: |
+        # Without min_over_time, failed scrapes could create false negatives, see
+        # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+        (
+          predict_linear(prometheus_notifications_queue_length{job="prometheus-k8s",namespace="monitoring"}[5m], 60 * 30)
+        >
+          min_over_time(prometheus_notifications_queue_capacity{job="prometheus-k8s",namespace="monitoring"}[5m])
+        )
+      for: 15m
+      labels:
+        severity: warning
+    - alert: Prometheus发送报警给Alertmanagers错误
+      annotations:
+        description: Prometheus {{$labels.namespace}}/{{$labels.pod}} 向 Alertmanager
+          {{$labels.alertmanager}} 发送警报时，出现 {{ printf "%.1f" $value }}%错误.
+        summary: Prometheus在将警报发送到特定的Alertmanager时遇到了超过1％的错误.
+      expr: |
+        (
+          rate(prometheus_notifications_errors_total{job="prometheus-k8s",namespace="monitoring"}[5m])
+        /
+          rate(prometheus_notifications_sent_total{job="prometheus-k8s",namespace="monitoring"}[5m])
+        )
+        * 100
+        > 1
+      for: 15m
+      labels:
+        severity: warning
+    - alert: Prometheus发送报警给Alertmanagers错误
+      annotations:
+        description: Prometheus {{$labels.namespace}}/{{$labels.pod}} 向 Alertmanager
+          {{$labels.alertmanager}} 发送警报时，出现 {{ printf "%.1f" $value }}%错误.
+        summary: Prometheus在将警报发送到特定的Alertmanager时遇到了超过3％的错误.
+      expr: |
+        min without(alertmanager) (
+          rate(prometheus_notifications_errors_total{job="prometheus-k8s",namespace="monitoring"}[5m])
+        /
+          rate(prometheus_notifications_sent_total{job="prometheus-k8s",namespace="monitoring"}[5m])
+        )
+        * 100
+        > 3
+      for: 15m
+      labels:
+        severity: critical
+    - alert: Prometheus连接Alertmanagers失败
+      annotations:
+        description: Prometheus{{$labels.namespace}}/{{$labels.pod}}未连接任何Alertmanagers服务.
+        summary: Prometheus未连接任何Alertmanagers.
+      expr: |
+        # Without max_over_time, failed scrapes could create false negatives, see
+        # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+        max_over_time(prometheus_notifications_alertmanagers_discovered{job="prometheus-k8s",namespace="monitoring"}[5m]) < 1
+      for: 10m
+      labels:
+        severity: warning
+    - alert: PrometheusTSDB重载失败
+      annotations:
+        description: Prometheus {{$labels.namespace}}/{{$labels.pod}} 已检查到 {{$value
+          | humanize}} 重载失败超过3小时.
+        summary: Prometheus在从磁盘重新加载块时遇到问题.
+      expr: |
+        increase(prometheus_tsdb_reloads_failures_total{job="prometheus-k8s",namespace="monitoring"}[3h]) > 0
+      for: 4h
+      labels:
+        severity: warning
+    - alert: Prometheus远程存储故障
+      annotations:
+        description: Prometheus {{$labels.namespace}}/{{$labels.pod}} failed to send
+          {{ printf "%.1f" $value }}% of the samples to queue {{$labels.queue}}.
+        summary: PPrometheus无法将样本发送到远程存储.
+      expr: |
+        (
+          rate(prometheus_remote_storage_failed_samples_total{job="prometheus-k8s",namespace="monitoring"}[5m])
+        /
+          (
+            rate(prometheus_remote_storage_failed_samples_total{job="prometheus-k8s",namespace="monitoring"}[5m])
+          +
+            rate(prometheus_remote_storage_succeeded_samples_total{job="prometheus-k8s",namespace="monitoring"}[5m])
+          )
+        )
+        * 100
+        > 1
+      for: 15m
+      labels:
+        severity: critical
+    - alert: Prometheus远程写滞后
+      annotations:
+        description: Prometheus {{$labels.namespace}}/{{$labels.pod}} 远程写队列{{$labels.queue}}滞后{{
+          printf "%.1f" $value }}s
+        summary: Prometheus远程写滞后.
+      expr: |
+        # Without max_over_time, failed scrapes could create false negatives, see
+        # https://www.robustperception.io/alerting-on-gauges-in-prometheus-2-0 for details.
+        (
+          max_over_time(prometheus_remote_storage_highest_timestamp_in_seconds{job="prometheus-k8s",namespace="monitoring"}[5m])
+        - on(job, instance) group_right
+          max_over_time(prometheus_remote_storage_queue_highest_sent_timestamp_seconds{job="prometheus-k8s",namespace="monitoring"}[5m])
+        )
+        > 120
+      for: 15m
+      labels:
+        severity: critical
+    - alert: Prometheus规则执行失败
+      annotations:
+        description: Prometheus {{$labels.namespace}}/{{$labels.pod}}在最近5min内无法通过规则{{
+          printf "%.0f" $value }}的评估
+        summary: Prometheus无法通过规则评估。
+      expr: |
+        increase(prometheus_rule_evaluation_failures_total{job="prometheus-k8s",namespace="monitoring"}[5m]) > 0
+      for: 15m
+      labels:
+        severity: critical
+    - alert: Prometheus丢失规则评估
+      annotations:
+        description: Prometheus {{$labels.namespace}}/{{$labels.pod}} has missed {{
+          printf "%.0f" $value }} rule group evaluations in the last 5m.
+        summary: 由于规则组评估缓慢，Prometheus缺少规则评估。
+      expr: |
+        increase(prometheus_rule_group_iterations_missed_total{job="prometheus-k8s",namespace="monitoring"}[5m]) > 0
+      for: 15m
+      labels:
+        severity: warning
+  - name: alertmanager.rules
+    rules:
+    - alert: Alertmanager配置不一致
+      annotations:
+        message: Alertmanager集群 `{{$labels.service}}`实例配置不同步.
+      expr: |
+        count_values("config_hash", alertmanager_config_hash{job="alertmanager-main",namespace="monitoring"}) BY (service) / ON(service) GROUP_LEFT() label_replace(max(prometheus_operator_spec_replicas{job="prometheus-operator",namespace="monitoring",controller="alertmanager"}) by (name, job, namespace, controller), "service", "alertmanager-$1", "name", "(.*)") != 1
+      for: 5m
+      labels:
+        severity: critical
+    - alert: Alertmanager重载失败
+      annotations:
+        message: Alertmanager {{ $labels.namespace }}/{{ $labels.pod}}载入配置失败.
+      expr: |
+        alertmanager_config_last_reload_successful{job="alertmanager-main",namespace="monitoring"} == 0
+      for: 10m
+      labels:
+        severity: warning
+    - alert: Alertmanager成员不一致
+      annotations:
+        message: Alertmanager尚未找到群集的所有其他成员.
+      expr: |
+        alertmanager_cluster_members{job="alertmanager-main",namespace="monitoring"}
+          != on (service) GROUP_LEFT()
+        count by (service) (alertmanager_cluster_members{job="alertmanager-main",namespace="monitoring"})
+      for: 5m
+      labels:
+        severity: critical
+  - name: general.rules
+    rules:
+    - alert: 目标不存在
+      annotations:
+        message: '{{ $labels.job }} 目标中的 {{ printf "%.4g" $value }}% 不存在'
+      expr: 100 * (count(up == 0) BY (job, namespace, service) / count(up) BY (job,
+        namespace, service)) > 10
+      for: 1m
+      labels:
+        severity: warning
+  - name: prometheus-operator
+    rules:
+    - alert: PrometheusOperator调用错误
+      annotations:
+        message: 命名空间 {{ $labels.namespace }} 中的 {{ $labels.controller }} 时出错
+      expr: |
+        rate(prometheus_operator_reconcile_errors_total{job="prometheus-operator",namespace="monitoring"}[5m]) > 0.1
+      for: 10m
+      labels:
+        severity: warning
+    - alert: PrometheusOperator节点查找错误
+      annotations:
+        message: 命名空间 {{ $labels.namespace }} 中的 PrometheusOperator 出错
+      expr: |
+        rate(prometheus_operator_node_address_lookup_errors_total{job="prometheus-operator",namespace="monitoring"}[5m]) > 0.1
+      for: 10m
+      labels:
+        severity: warning
